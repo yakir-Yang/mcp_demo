@@ -26,15 +26,81 @@ export class DataManager {
   }
 
   async loadStoresData() {
-    // 直接使用示例数据，确保功能正常
-    console.error('使用示例门店数据');
-    this.stores = this.getSampleStoresData();
+    const storesPath = path.join(__dirname, '../data/stores.xlsx');
+    
+    if (!fs.existsSync(storesPath)) {
+      console.error('门店数据文件不存在，使用示例数据');
+      this.stores = this.getSampleStoresData();
+      return;
+    }
+
+    try {
+      // 尝试作为Excel文件读取
+      const workbook = XLSX.readFile(storesPath);
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const data = XLSX.utils.sheet_to_json(worksheet);
+
+      this.stores = data.map(store => ({
+        name: store['网点名称'],
+        status: store['状态'],
+        coordinates: store['经纬度'],
+        province: store['省份'],
+        city: store['城市'],
+        district: store['区/县'],
+        address: store['详细地址'],
+        longitude: parseFloat(store['经度']) || 0,
+        latitude: parseFloat(store['纬度']) || 0,
+        type: store['门店类型'],
+        openDate: store['开业时间'],
+        businessHours: store['营业时间'],
+        rating: parseFloat(store['评分']) || 0,
+        phone: store['联系电话']
+      }));
+      
+      console.error(`从Excel文件加载门店数据: ${this.stores.length} 个门店`);
+    } catch (error) {
+      console.error('Excel文件读取失败，使用示例数据:', error.message);
+      this.stores = this.getSampleStoresData();
+    }
   }
 
   async loadOrdersData() {
-    // 直接使用示例数据，确保功能正常
-    console.error('使用示例订单数据');
-    this.orders = this.getSampleOrdersData();
+    const ordersPath = path.join(__dirname, '../data/orders.xlsx');
+    
+    if (!fs.existsSync(ordersPath)) {
+      console.error('订单数据文件不存在，使用示例数据');
+      this.orders = this.getSampleOrdersData();
+      return;
+    }
+
+    try {
+      // 尝试作为Excel文件读取
+      const workbook = XLSX.readFile(ordersPath);
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const data = XLSX.utils.sheet_to_json(worksheet);
+
+      this.orders = data.map(order => ({
+        orderId: order['订单号'],
+        userId: order['用户id'],
+        phone: order['手机号'],
+        deviceId: order['设备id'],
+        location: order['租借位置'],
+        startTime: order['租借开始时间'],
+        returnTime: order['退还时间'],
+        duration: parseInt(order['持续时间/分钟']) || 0,
+        returnStore: order['归还网点'],
+        cost: parseFloat(order['计费']) || 0,
+        status: order['租借状态'],
+        paymentMethod: order['支付方式']
+      }));
+      
+      console.error(`从Excel文件加载订单数据: ${this.orders.length} 个订单`);
+    } catch (error) {
+      console.error('Excel文件读取失败，使用示例数据:', error.message);
+      this.orders = this.getSampleOrdersData();
+    }
   }
 
   getSampleStoresData() {
