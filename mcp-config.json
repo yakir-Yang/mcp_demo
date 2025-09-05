@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "ai-customer-service": {
+      "command": "node",
+      "args": ["src/server.js"],
+      "cwd": "/Users/kk/Desktop/mcp_test",
+      "env": {
+        "NODE_ENV": "production"
+      }
+    }
+  }
+}
