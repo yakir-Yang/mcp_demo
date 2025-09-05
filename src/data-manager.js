@@ -81,20 +81,35 @@ export class DataManager {
       const worksheet = workbook.Sheets[sheetName];
       const data = XLSX.utils.sheet_to_json(worksheet);
 
-      this.orders = data.map(order => ({
-        orderId: order['订单号'],
-        userId: order['用户id'],
-        phone: order['手机号'],
-        deviceId: order['设备id'],
-        location: order['租借位置'],
-        startTime: order['租借开始时间'],
-        returnTime: order['退还时间'],
-        duration: parseInt(order['持续时间/分钟']) || 0,
-        returnStore: order['归还网点'],
-        cost: parseFloat(order['计费']) || 0,
-        status: order['租借状态'],
-        paymentMethod: order['支付方式']
-      }));
+      this.orders = data.map(order => {
+        // 调试：显示第一条记录的详细信息
+        if (data.indexOf(order) === 0) {
+          console.error('Excel订单数据字段:', Object.keys(order));
+          console.error('第一条订单原始数据:', order);
+        }
+        
+        const mappedOrder = {
+          orderId: order['订单号'],
+          userId: order['用户id'],
+          phone: String(order['手机号']), // 确保手机号是字符串类型
+          deviceId: order['设备id'],
+          location: order['ai6'] || order['租借位置'] || order['租借门店'] || order['门店名称'] || '未知位置',
+          startTime: order['租借开始时间'],
+          returnTime: order['退还时间'],
+          duration: parseInt(order['持续时间/分钟']) || 0,
+          returnStore: order['归还网点'],
+          cost: parseFloat(order['计费']) || 0,
+          status: order['租借状态'],
+          paymentMethod: order['支付方式']
+        };
+        
+        // 调试：显示第一条记录的映射结果
+        if (data.indexOf(order) === 0) {
+          console.error('第一条订单映射结果:', mappedOrder);
+        }
+        
+        return mappedOrder;
+      });
       
       console.error(`从Excel文件加载订单数据: ${this.orders.length} 个订单`);
     } catch (error) {
@@ -281,7 +296,14 @@ export class DataManager {
 
   // 根据手机号查询订单
   queryOrdersByPhone(phone) {
-    return this.orders.filter(order => order.phone === phone);
+    console.error(`查询手机号: ${phone}`);
+    console.error(`总订单数: ${this.orders.length}`);
+    console.error(`前5个订单的手机号:`, this.orders.slice(0, 5).map(o => o.phone));
+    
+    const result = this.orders.filter(order => order.phone === phone);
+    console.error(`找到订单数: ${result.length}`);
+    
+    return result;
   }
 
   // 根据经纬度查询附近门店
