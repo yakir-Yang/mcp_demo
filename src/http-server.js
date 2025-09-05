@@ -66,6 +66,37 @@ class CustomerServiceHTTPServer {
       });
     });
 
+    // MCP协议 - SSE端点（腾讯云ADP需要）
+    this.app.get('/sse', (req, res) => {
+      // 设置SSE响应头
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Cache-Control'
+      });
+
+      // 发送初始连接确认
+      res.write('data: {"type":"connection","status":"connected","timestamp":"' + new Date().toISOString() + '"}\n\n');
+
+      // 定期发送心跳
+      const heartbeat = setInterval(() => {
+        res.write('data: {"type":"heartbeat","timestamp":"' + new Date().toISOString() + '"}\n\n');
+      }, 30000); // 每30秒发送一次心跳
+
+      // 处理客户端断开连接
+      req.on('close', () => {
+        clearInterval(heartbeat);
+        console.log('SSE客户端断开连接');
+      });
+
+      req.on('error', (err) => {
+        clearInterval(heartbeat);
+        console.error('SSE连接错误:', err);
+      });
+    });
+
     // 工具列表端点
     this.app.post('/tools/list', (req, res) => {
       try {

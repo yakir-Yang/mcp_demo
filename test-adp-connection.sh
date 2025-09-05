@@ -183,6 +183,37 @@ test_cors() {
     fi
 }
 
+# 测试SSE端点
+test_sse_endpoint() {
+    log_test "测试SSE端点..."
+    
+    # 测试SSE端点是否存在
+    local response=$(curl -s -I "$SERVER_URL/sse" --connect-timeout 10)
+    
+    if echo "$response" | grep -q "text/event-stream"; then
+        log_success "SSE端点配置正常"
+        
+        # 测试SSE连接（5秒后断开）
+        log_info "测试SSE连接（5秒）..."
+        timeout 5s curl -s -N "$SERVER_URL/sse" | head -3 > /tmp/sse_test.log 2>/dev/null
+        
+        if [ -s /tmp/sse_test.log ]; then
+            log_success "SSE数据流正常"
+            echo "SSE数据示例:"
+            head -2 /tmp/sse_test.log | sed 's/^/  /'
+            rm -f /tmp/sse_test.log
+        else
+            log_warning "SSE数据流可能有问题"
+        fi
+        
+        return 0
+    else
+        log_error "SSE端点配置失败"
+        echo "响应头: $response"
+        return 1
+    fi
+}
+
 # 生成测试报告
 generate_report() {
     local total_tests=$1
@@ -284,6 +315,13 @@ run_tests() {
     # 测试6: CORS
     total_tests=$((total_tests + 1))
     if test_cors; then
+        passed_tests=$((passed_tests + 1))
+    fi
+    echo
+    
+    # 测试7: SSE端点
+    total_tests=$((total_tests + 1))
+    if test_sse_endpoint; then
         passed_tests=$((passed_tests + 1))
     fi
     echo
