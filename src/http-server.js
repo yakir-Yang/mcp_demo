@@ -69,33 +69,73 @@ class CustomerServiceHTTPServer {
     // MCP协议 - SSE端点（腾讯云ADP需要）
     this.app.get('/sse', (req, res) => {
       console.log('SSE连接请求来自:', req.ip, req.get('User-Agent'));
-      console.log('请求头:', req.headers);
+      console.log('请求头:', JSON.stringify(req.headers, null, 2));
       
-      // 设置SSE响应头（腾讯云ADP兼容）
+      // 检查是否是腾讯云ADP请求
+      const isTencentADP = req.get('User-Agent') === 'TencentADP/1.0';
+      const acceptHeader = req.get('Accept');
+      
+      console.log('是否为腾讯云ADP请求:', isTencentADP);
+      console.log('Accept头:', acceptHeader);
+      
+      // 根据Accept头决定响应类型
+      if (acceptHeader && acceptHeader.includes('application/json')) {
+        // 腾讯云ADP可能期望JSON响应而不是SSE
+        console.log('检测到JSON Accept头，返回JSON响应');
+        
+        res.json({
+          status: 'connected',
+          protocol: 'mcp',
+          version: '2024-11-05',
+          server: 'ai-customer-service-mcp-server',
+          timestamp: new Date().toISOString(),
+          capabilities: {
+            tools: true,
+            sse: true
+          },
+          tools: ['query_order', 'query_stores'],
+          endpoints: {
+            health: '/health',
+            tools_list: '/tools/list',
+            tools_call: '/tools/call'
+          }
+        });
+        return;
+      }
+      
+      // 标准SSE响应
       res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-store, must-revalidate, private',
         'Pragma': 'no-cache',
         'Expires': '0',
         'Connection': 'keep-alive',
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Cache-Control, Content-Type, Authorization',
+        'Access-Control-Allow-Headers': 'Cache-Control, Content-Type, Authorization, Accept',
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
         'Access-Control-Allow-Credentials': 'true',
-        'X-Accel-Buffering': 'no', // 禁用Nginx缓冲
-        'Transfer-Encoding': 'chunked'
+        'Access-Control-Expose-Headers': 'Content-Type',
+        'X-Accel-Buffering': 'no',
+        'Transfer-Encoding': 'chunked',
+        'Keep-Alive': 'timeout=300, max=1000'
       });
 
-      // 立即发送连接确认（腾讯云ADP可能需要立即响应）
+      // 立即发送连接确认
       try {
-        // 发送简单的连接确认
-        res.write(': connected\n');
+        // 发送SSE注释（保持连接活跃）
+        res.write(': SSE连接已建立\n');
+        
+        // 发送连接事件
         res.write('event: connected\n');
-        res.write('data: {"status":"connected","timestamp":"' + new Date().toISOString() + '"}\n\n');
+        res.write('data: {"status":"connected","timestamp":"' + new Date().toISOString() + '","server":"ai-customer-service-mcp-server"}\n\n');
         
         // 发送MCP协议信息
         res.write('event: mcp-info\n');
-        res.write('data: {"protocol":"mcp","version":"2024-11-05","server":"ai-customer-service-mcp-server"}\n\n');
+        res.write('data: {"protocol":"mcp","version":"2024-11-05","capabilities":{"tools":true},"server":"ai-customer-service-mcp-server","version":"1.0.0"}\n\n');
+        
+        // 发送工具信息
+        res.write('event: tools-available\n');
+        res.write('data: {"tools":["query_order","query_stores"],"count":2}\n\n');
         
         console.log('SSE连接已建立，初始消息已发送');
       } catch (err) {
@@ -103,24 +143,30 @@ class CustomerServiceHTTPServer {
         return;
       }
 
-      // 定期发送心跳（每30秒，减少频率）
+      // 定期发送心跳（每60秒）
       const heartbeat = setInterval(() => {
         try {
           res.write('event: heartbeat\n');
-          res.write('data: {"timestamp":"' + new Date().toISOString() + '"}\n\n');
+          res.write('data: {"timestamp":"' + new Date().toISOString() + '","status":"alive","uptime":' + process.uptime() + '}\n\n');
           console.log('SSE心跳已发送');
         } catch (err) {
           console.error('SSE心跳发送失败:', err);
           clearInterval(heartbeat);
         }
-      }, 30000);
+      }, 60000);
 
-      // 处理客户端断开连接
+      // 连接管理
+      let isConnected = true;
+      
       const cleanup = () => {
-        clearInterval(heartbeat);
-        console.log('SSE连接已清理');
+        if (isConnected) {
+          isConnected = false;
+          clearInterval(heartbeat);
+          console.log('SSE连接已清理');
+        }
       };
 
+      // 处理客户端断开
       req.on('close', () => {
         console.log('SSE客户端主动断开连接');
         cleanup();
@@ -136,8 +182,13 @@ class CustomerServiceHTTPServer {
         cleanup();
       });
 
-      // 设置连接超时（10分钟，给腾讯云ADP更多时间）
-      req.setTimeout(600000, () => {
+      // 处理客户端数据
+      req.on('data', (chunk) => {
+        console.log('收到SSE客户端数据:', chunk.toString());
+      });
+
+      // 设置连接超时（15分钟）
+      req.setTimeout(900000, () => {
         console.log('SSE连接超时，主动断开');
         cleanup();
         try {
@@ -147,10 +198,7 @@ class CustomerServiceHTTPServer {
         }
       });
 
-      // 保持连接活跃
-      req.on('data', (chunk) => {
-        console.log('收到SSE数据:', chunk.toString());
-      });
+      console.log('SSE连接建立完成');
     });
 
     // 工具列表端点
