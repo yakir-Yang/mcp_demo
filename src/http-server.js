@@ -68,32 +68,73 @@ class CustomerServiceHTTPServer {
 
     // MCP协议 - SSE端点（腾讯云ADP需要）
     this.app.get('/sse', (req, res) => {
+      console.log('SSE连接请求来自:', req.ip, req.get('User-Agent'));
+      
       // 设置SSE响应头
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Cache-Control'
+        'Access-Control-Allow-Headers': 'Cache-Control',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'X-Accel-Buffering': 'no' // 禁用Nginx缓冲
       });
 
       // 发送初始连接确认
-      res.write('data: {"type":"connection","status":"connected","timestamp":"' + new Date().toISOString() + '"}\n\n');
+      const initMessage = {
+        type: 'connection',
+        status: 'connected',
+        timestamp: new Date().toISOString(),
+        server: 'ai-customer-service-mcp-server',
+        version: '1.0.0'
+      };
+      
+      try {
+        res.write(`data: ${JSON.stringify(initMessage)}\n\n`);
+        console.log('SSE连接已建立');
+      } catch (err) {
+        console.error('SSE写入错误:', err);
+        return;
+      }
 
-      // 定期发送心跳
+      // 定期发送心跳（每10秒）
       const heartbeat = setInterval(() => {
-        res.write('data: {"type":"heartbeat","timestamp":"' + new Date().toISOString() + '"}\n\n');
-      }, 30000); // 每30秒发送一次心跳
+        try {
+          const heartbeatMessage = {
+            type: 'heartbeat',
+            timestamp: new Date().toISOString(),
+            status: 'alive'
+          };
+          res.write(`data: ${JSON.stringify(heartbeatMessage)}\n\n`);
+        } catch (err) {
+          console.error('SSE心跳发送失败:', err);
+          clearInterval(heartbeat);
+        }
+      }, 10000);
 
       // 处理客户端断开连接
-      req.on('close', () => {
+      const cleanup = () => {
         clearInterval(heartbeat);
-        console.log('SSE客户端断开连接');
+        console.log('SSE连接已清理');
+      };
+
+      req.on('close', cleanup);
+      req.on('error', (err) => {
+        console.error('SSE连接错误:', err.message);
+        cleanup();
+      });
+      
+      res.on('error', (err) => {
+        console.error('SSE响应错误:', err.message);
+        cleanup();
       });
 
-      req.on('error', (err) => {
-        clearInterval(heartbeat);
-        console.error('SSE连接错误:', err);
+      // 设置连接超时（5分钟）
+      req.setTimeout(300000, () => {
+        console.log('SSE连接超时，主动断开');
+        cleanup();
+        res.end();
       });
     });
 
@@ -250,6 +291,15 @@ class CustomerServiceHTTPServer {
       });
     });
 
+    // 处理OPTIONS预检请求
+    this.app.options('*', (req, res) => {
+      res.header('Access-Control-Allow-Origin', '*');
+      res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+      res.header('Access-Control-Max-Age', '86400');
+      res.sendStatus(200);
+    });
+
     // 404处理
     this.app.use('*', (req, res) => {
       res.status(404).json({
@@ -258,6 +308,8 @@ class CustomerServiceHTTPServer {
         available_endpoints: [
           'GET /',
           'GET /health',
+          'GET /sse',
+          'POST /mcp/initialize',
           'POST /tools/list',
           'POST /tools/call',
           'POST /query_order',
