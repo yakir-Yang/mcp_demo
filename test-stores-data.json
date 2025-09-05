@@ -1,0 +1,13 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+    "name": "query_stores",
+    "arguments": {
+      "latitude": 39.946613,
+      "longitude": 116.370503,
+      "limit": 3
+    }
+  }
+}

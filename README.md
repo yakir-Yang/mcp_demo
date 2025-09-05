@@ -307,7 +307,20 @@ sudo apt-get install -y nodejs
 npm install
 ```
 
-### 2. 启动服务器
+### 2. 测试功能
+
+```bash
+# 快速测试（推荐）
+node quick-test.js
+
+# 完整测试（需要启动服务器）
+./test-mcp-server.sh
+
+# 查看测试指南
+cat MANUAL_TEST_GUIDE.md
+```
+
+### 3. 启动服务器
 
 ```bash
 # 使用启动脚本
@@ -320,7 +333,7 @@ npm start
 npm run dev
 ```
 
-### 3. 配置MCP客户端
+### 4. 配置MCP客户端
 
 将以下配置添加到您的MCP客户端配置文件中：
 
