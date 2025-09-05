@@ -5,7 +5,7 @@ import cors from 'cors';
 import { DataManager } from './data-manager.js';
 import { OrderTool, StoreTool } from './tools/index.js';
 
-class CustomerServiceHTTPServer {
+class TencentADPMCPServer {
   constructor() {
     this.app = express();
     this.port = process.env.PORT || 3000;
@@ -15,9 +15,9 @@ class CustomerServiceHTTPServer {
   }
 
   setupMiddleware() {
-    // 启用CORS，支持腾讯云ADP
+    // 启用CORS，允许腾讯云ADP访问
     this.app.use(cors({
-      origin: ['https://adp.tencent.com', 'https://*.tencent.com', '*'],
+      origin: ['https://adp.tencent.com', 'https://*.tencent.com'],
       credentials: true,
       methods: ['GET', 'POST', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
@@ -28,18 +28,38 @@ class CustomerServiceHTTPServer {
     
     // 请求日志
     this.app.use((req, res, next) => {
-      console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+      console.log(`${new Date().toISOString()} - ${req.method} ${req.path} - ${req.get('User-Agent') || 'Unknown'}`);
       next();
     });
   }
 
   setupRoutes() {
+    // 根路径 - 提供MCP服务器信息
+    this.app.get('/', (req, res) => {
+      res.json({
+        name: 'AI智能客服MCP Server',
+        version: '1.0.0',
+        description: '提供订单查询和网点查询功能的MCP服务器',
+        protocol: 'mcp',
+        capabilities: {
+          tools: true
+        },
+        endpoints: {
+          health: '/health',
+          tools_list: '/tools/list',
+          tools_call: '/tools/call'
+        },
+        tools: ['query_order', 'query_stores']
+      });
+    });
+
     // 健康检查端点
     this.app.get('/health', (req, res) => {
       res.json({
         status: 'healthy',
         timestamp: new Date().toISOString(),
         version: '1.0.0',
+        protocol: 'mcp',
         services: {
           dataManager: this.dataManager ? 'ready' : 'not ready',
           stores: this.dataManager?.stores?.length || 0,
@@ -66,7 +86,7 @@ class CustomerServiceHTTPServer {
       });
     });
 
-    // 工具列表端点
+    // MCP协议 - 工具列表端点
     this.app.post('/tools/list', (req, res) => {
       try {
         const response = {
@@ -83,6 +103,7 @@ class CustomerServiceHTTPServer {
                     phone: {
                       type: 'string',
                       description: '用户手机号',
+                      pattern: '^1[3-9]\\d{9}$'
                     },
                   },
                   required: ['phone'],
@@ -97,15 +118,21 @@ class CustomerServiceHTTPServer {
                     latitude: {
                       type: 'number',
                       description: '纬度',
+                      minimum: -90,
+                      maximum: 90
                     },
                     longitude: {
                       type: 'number',
                       description: '经度',
+                      minimum: -180,
+                      maximum: 180
                     },
                     limit: {
                       type: 'number',
                       description: '返回网点数量限制',
                       default: 10,
+                      minimum: 1,
+                      maximum: 50
                     },
                   },
                   required: ['latitude', 'longitude'],
@@ -128,7 +155,7 @@ class CustomerServiceHTTPServer {
       }
     });
 
-    // 工具调用端点
+    // MCP协议 - 工具调用端点
     this.app.post('/tools/call', async (req, res) => {
       try {
         const { name, arguments: args } = req.body.params || req.body;
@@ -202,23 +229,6 @@ class CustomerServiceHTTPServer {
       }
     });
 
-    // 根路径
-    this.app.get('/', (req, res) => {
-      res.json({
-        name: 'AI智能客服MCP Server',
-        version: '1.0.0',
-        description: '提供订单查询和网点查询功能的MCP服务器',
-        endpoints: {
-          health: '/health',
-          tools_list: '/tools/list',
-          tools_call: '/tools/call',
-          query_order: '/query_order',
-          query_stores: '/query_stores'
-        },
-        tools: ['query_order', 'query_stores']
-      });
-    });
-
     // 404处理
     this.app.use('*', (req, res) => {
       res.status(404).json({
@@ -227,6 +237,7 @@ class CustomerServiceHTTPServer {
         available_endpoints: [
           'GET /',
           'GET /health',
+          'POST /mcp/initialize',
           'POST /tools/list',
           'POST /tools/call',
           'POST /query_order',
@@ -252,11 +263,13 @@ class CustomerServiceHTTPServer {
       
       // 启动HTTP服务器
       this.app.listen(this.port, '0.0.0.0', () => {
-        console.log(`AI智能客服MCP Server已启动`);
+        console.log(`腾讯云ADP MCP Server已启动`);
         console.log(`服务器地址: http://0.0.0.0:${this.port}`);
         console.log(`健康检查: http://0.0.0.0:${this.port}/health`);
+        console.log(`MCP初始化: http://0.0.0.0:${this.port}/mcp/initialize`);
         console.log(`工具列表: http://0.0.0.0:${this.port}/tools/list`);
         console.log(`数据统计: ${this.dataManager.stores.length} 个门店, ${this.dataManager.orders.length} 个订单`);
+        console.log(`腾讯云ADP配置: http://106.53.191.184:${this.port}`);
       });
     } catch (error) {
       console.error('服务器启动失败:', error);
@@ -266,5 +279,5 @@ class CustomerServiceHTTPServer {
 }
 
 // 启动服务器
-const server = new CustomerServiceHTTPServer();
+const server = new TencentADPMCPServer();
 server.start();
