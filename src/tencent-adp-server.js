@@ -5,7 +5,7 @@ import cors from 'cors';
 import { DataManager } from './data-manager.js';
 import { OrderTool, StoreTool } from './tools/index.js';
 
-class CustomerServiceHTTPServer {
+class TencentADPMCPServer {
   constructor() {
     this.app = express();
     this.port = process.env.PORT || 3000;
@@ -15,112 +15,144 @@ class CustomerServiceHTTPServer {
   }
 
   setupMiddleware() {
-    // 启用CORS，支持腾讯云ADP
+    // 启用CORS，专门为腾讯云ADP优化
     this.app.use(cors({
-      origin: ['https://adp.tencent.com', 'https://*.tencent.com', '*'],
+      origin: true, // 允许所有来源
       credentials: true,
-      methods: ['GET', 'POST', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Cache-Control', 'Accept'],
+      exposedHeaders: ['Content-Type', 'Authorization']
     }));
     
     // 解析JSON请求体
-    this.app.use(express.json());
+    this.app.use(express.json({ limit: '10mb' }));
+    this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
     
     // 请求日志
     this.app.use((req, res, next) => {
-      console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+      const timestamp = new Date().toISOString();
+      console.log(`${timestamp} - ${req.method} ${req.path} - ${req.ip} - ${req.get('User-Agent') || 'Unknown'}`);
+      
+      // 记录请求头（调试用）
+      if (req.path === '/sse') {
+        console.log('SSE请求头:', JSON.stringify(req.headers, null, 2));
+      }
+      
       next();
     });
   }
 
   setupRoutes() {
+    // 根路径 - 提供服务器信息
+    this.app.get('/', (req, res) => {
+      res.json({
+        name: 'AI智能客服MCP Server',
+        version: '1.0.0',
+        description: '腾讯云ADP兼容的MCP服务器',
+        protocol: 'mcp',
+        capabilities: {
+          tools: true,
+          sse: true
+        },
+        endpoints: {
+          health: '/health',
+          sse: '/sse',
+          mcp_initialize: '/mcp/initialize',
+          tools_list: '/tools/list',
+          tools_call: '/tools/call'
+        },
+        tools: ['query_order', 'query_stores'],
+        sse_events: ['connected', 'mcp-info', 'heartbeat']
+      });
+    });
+
     // 健康检查端点
     this.app.get('/health', (req, res) => {
       res.json({
         status: 'healthy',
         timestamp: new Date().toISOString(),
         version: '1.0.0',
+        protocol: 'mcp',
         services: {
           dataManager: this.dataManager ? 'ready' : 'not ready',
           stores: this.dataManager?.stores?.length || 0,
           orders: this.dataManager?.orders?.length || 0
-        }
+        },
+        uptime: process.uptime()
       });
     });
 
-    // MCP协议 - 初始化端点
-    this.app.post('/mcp/initialize', (req, res) => {
-      res.json({
-        jsonrpc: '2.0',
-        id: req.body.id || 1,
-        result: {
-          protocolVersion: '2024-11-05',
-          capabilities: {
-            tools: {}
-          },
-          serverInfo: {
-            name: 'ai-customer-service-mcp-server',
-            version: '1.0.0'
-          }
-        }
-      });
-    });
-
-    // MCP协议 - SSE端点（腾讯云ADP需要）
+    // 腾讯云ADP专用SSE端点
     this.app.get('/sse', (req, res) => {
-      console.log('SSE连接请求来自:', req.ip, req.get('User-Agent'));
-      console.log('请求头:', req.headers);
+      console.log('=== SSE连接开始 ===');
+      console.log('客户端IP:', req.ip);
+      console.log('User-Agent:', req.get('User-Agent'));
+      console.log('请求头:', JSON.stringify(req.headers, null, 2));
       
-      // 设置SSE响应头（腾讯云ADP兼容）
+      // 设置SSE响应头（腾讯云ADP专用）
       res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-store, must-revalidate, private',
         'Pragma': 'no-cache',
         'Expires': '0',
         'Connection': 'keep-alive',
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Cache-Control, Content-Type, Authorization',
+        'Access-Control-Allow-Headers': 'Cache-Control, Content-Type, Authorization, Accept',
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
         'Access-Control-Allow-Credentials': 'true',
-        'X-Accel-Buffering': 'no', // 禁用Nginx缓冲
-        'Transfer-Encoding': 'chunked'
+        'Access-Control-Expose-Headers': 'Content-Type',
+        'X-Accel-Buffering': 'no',
+        'Transfer-Encoding': 'chunked',
+        'Keep-Alive': 'timeout=300, max=1000'
       });
 
-      // 立即发送连接确认（腾讯云ADP可能需要立即响应）
+      // 立即发送连接确认
       try {
-        // 发送简单的连接确认
-        res.write(': connected\n');
+        // 发送SSE注释（保持连接活跃）
+        res.write(': SSE连接已建立\n');
+        
+        // 发送连接事件
         res.write('event: connected\n');
-        res.write('data: {"status":"connected","timestamp":"' + new Date().toISOString() + '"}\n\n');
+        res.write('data: {"status":"connected","timestamp":"' + new Date().toISOString() + '","server":"ai-customer-service-mcp-server"}\n\n');
         
         // 发送MCP协议信息
         res.write('event: mcp-info\n');
-        res.write('data: {"protocol":"mcp","version":"2024-11-05","server":"ai-customer-service-mcp-server"}\n\n');
+        res.write('data: {"protocol":"mcp","version":"2024-11-05","capabilities":{"tools":true},"server":"ai-customer-service-mcp-server","version":"1.0.0"}\n\n');
         
-        console.log('SSE连接已建立，初始消息已发送');
+        // 发送工具信息
+        res.write('event: tools-available\n');
+        res.write('data: {"tools":["query_order","query_stores"],"count":2}\n\n');
+        
+        console.log('SSE初始消息已发送');
       } catch (err) {
         console.error('SSE写入错误:', err);
         return;
       }
 
-      // 定期发送心跳（每30秒，减少频率）
+      // 定期发送心跳（每60秒）
       const heartbeat = setInterval(() => {
         try {
           res.write('event: heartbeat\n');
-          res.write('data: {"timestamp":"' + new Date().toISOString() + '"}\n\n');
+          res.write('data: {"timestamp":"' + new Date().toISOString() + '","status":"alive","uptime":' + process.uptime() + '}\n\n');
           console.log('SSE心跳已发送');
         } catch (err) {
           console.error('SSE心跳发送失败:', err);
           clearInterval(heartbeat);
         }
-      }, 30000);
+      }, 60000);
 
-      // 处理客户端断开连接
+      // 连接管理
+      let isConnected = true;
+      
       const cleanup = () => {
-        clearInterval(heartbeat);
-        console.log('SSE连接已清理');
+        if (isConnected) {
+          isConnected = false;
+          clearInterval(heartbeat);
+          console.log('SSE连接已清理');
+        }
       };
 
+      // 处理客户端断开
       req.on('close', () => {
         console.log('SSE客户端主动断开连接');
         cleanup();
@@ -136,8 +168,13 @@ class CustomerServiceHTTPServer {
         cleanup();
       });
 
-      // 设置连接超时（10分钟，给腾讯云ADP更多时间）
-      req.setTimeout(600000, () => {
+      // 处理客户端数据
+      req.on('data', (chunk) => {
+        console.log('收到SSE客户端数据:', chunk.toString());
+      });
+
+      // 设置连接超时（15分钟）
+      req.setTimeout(900000, () => {
         console.log('SSE连接超时，主动断开');
         cleanup();
         try {
@@ -147,15 +184,36 @@ class CustomerServiceHTTPServer {
         }
       });
 
-      // 保持连接活跃
-      req.on('data', (chunk) => {
-        console.log('收到SSE数据:', chunk.toString());
+      console.log('=== SSE连接建立完成 ===');
+    });
+
+    // MCP协议 - 初始化端点
+    this.app.post('/mcp/initialize', (req, res) => {
+      console.log('MCP初始化请求:', req.body);
+      
+      res.json({
+        jsonrpc: '2.0',
+        id: req.body.id || 1,
+        result: {
+          protocolVersion: '2024-11-05',
+          capabilities: {
+            tools: {
+              listChanged: true
+            }
+          },
+          serverInfo: {
+            name: 'ai-customer-service-mcp-server',
+            version: '1.0.0'
+          }
+        }
       });
     });
 
-    // 工具列表端点
+    // MCP协议 - 工具列表端点
     this.app.post('/tools/list', (req, res) => {
       try {
+        console.log('工具列表请求:', req.body);
+        
         const response = {
           jsonrpc: '2.0',
           id: req.body.id || 1,
@@ -170,6 +228,7 @@ class CustomerServiceHTTPServer {
                     phone: {
                       type: 'string',
                       description: '用户手机号',
+                      pattern: '^1[3-9]\\d{9}$'
                     },
                   },
                   required: ['phone'],
@@ -184,15 +243,21 @@ class CustomerServiceHTTPServer {
                     latitude: {
                       type: 'number',
                       description: '纬度',
+                      minimum: -90,
+                      maximum: 90
                     },
                     longitude: {
                       type: 'number',
                       description: '经度',
+                      minimum: -180,
+                      maximum: 180
                     },
                     limit: {
                       type: 'number',
                       description: '返回网点数量限制',
                       default: 10,
+                      minimum: 1,
+                      maximum: 50
                     },
                   },
                   required: ['latitude', 'longitude'],
@@ -201,8 +266,11 @@ class CustomerServiceHTTPServer {
             ],
           },
         };
+        
+        console.log('工具列表响应:', response);
         res.json(response);
       } catch (error) {
+        console.error('工具列表错误:', error);
         res.status(500).json({
           jsonrpc: '2.0',
           id: req.body.id || 1,
@@ -215,9 +283,11 @@ class CustomerServiceHTTPServer {
       }
     });
 
-    // 工具调用端点
+    // MCP协议 - 工具调用端点
     this.app.post('/tools/call', async (req, res) => {
       try {
+        console.log('工具调用请求:', req.body);
+        
         const { name, arguments: args } = req.body.params || req.body;
         
         if (!name) {
@@ -244,12 +314,14 @@ class CustomerServiceHTTPServer {
             throw new Error(`未知工具: ${name}`);
         }
 
+        console.log('工具调用结果:', result);
         res.json({
           jsonrpc: '2.0',
           id: req.body.id || 1,
           result: result,
         });
       } catch (error) {
+        console.error('工具调用错误:', error);
         res.status(500).json({
           jsonrpc: '2.0',
           id: req.body.id || 1,
@@ -266,51 +338,12 @@ class CustomerServiceHTTPServer {
       }
     });
 
-    // 兼容性端点 - 直接调用工具
-    this.app.post('/query_order', async (req, res) => {
-      try {
-        const result = await OrderTool.execute(req.body, this.dataManager);
-        res.json(result);
-      } catch (error) {
-        res.status(500).json({
-          error: error.message,
-        });
-      }
-    });
-
-    this.app.post('/query_stores', async (req, res) => {
-      try {
-        const result = await StoreTool.execute(req.body, this.dataManager);
-        res.json(result);
-      } catch (error) {
-        res.status(500).json({
-          error: error.message,
-        });
-      }
-    });
-
-    // 根路径
-    this.app.get('/', (req, res) => {
-      res.json({
-        name: 'AI智能客服MCP Server',
-        version: '1.0.0',
-        description: '提供订单查询和网点查询功能的MCP服务器',
-        endpoints: {
-          health: '/health',
-          tools_list: '/tools/list',
-          tools_call: '/tools/call',
-          query_order: '/query_order',
-          query_stores: '/query_stores'
-        },
-        tools: ['query_order', 'query_stores']
-      });
-    });
-
     // 处理OPTIONS预检请求
     this.app.options('*', (req, res) => {
       res.header('Access-Control-Allow-Origin', '*');
       res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-      res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+      res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
+      res.header('Access-Control-Allow-Credentials', 'true');
       res.header('Access-Control-Max-Age', '86400');
       res.sendStatus(200);
     });
@@ -326,9 +359,7 @@ class CustomerServiceHTTPServer {
           'GET /sse',
           'POST /mcp/initialize',
           'POST /tools/list',
-          'POST /tools/call',
-          'POST /query_order',
-          'POST /query_stores'
+          'POST /tools/call'
         ]
       });
     });
@@ -339,6 +370,7 @@ class CustomerServiceHTTPServer {
       res.status(500).json({
         error: 'Internal Server Error',
         message: error.message,
+        timestamp: new Date().toISOString()
       });
     });
   }
@@ -346,15 +378,23 @@ class CustomerServiceHTTPServer {
   async start() {
     try {
       // 初始化数据
+      console.log('正在初始化数据管理器...');
       await this.dataManager.loadData();
+      console.log('数据管理器初始化完成');
       
       // 启动HTTP服务器
       this.app.listen(this.port, '0.0.0.0', () => {
-        console.log(`AI智能客服MCP Server已启动`);
+        console.log('==========================================');
+        console.log('  腾讯云ADP MCP Server已启动');
+        console.log('==========================================');
         console.log(`服务器地址: http://0.0.0.0:${this.port}`);
         console.log(`健康检查: http://0.0.0.0:${this.port}/health`);
+        console.log(`SSE端点: http://0.0.0.0:${this.port}/sse`);
+        console.log(`MCP初始化: http://0.0.0.0:${this.port}/mcp/initialize`);
         console.log(`工具列表: http://0.0.0.0:${this.port}/tools/list`);
         console.log(`数据统计: ${this.dataManager.stores.length} 个门店, ${this.dataManager.orders.length} 个订单`);
+        console.log(`腾讯云ADP配置: http://106.53.191.184:${this.port}`);
+        console.log('==========================================');
       });
     } catch (error) {
       console.error('服务器启动失败:', error);
@@ -364,5 +404,5 @@ class CustomerServiceHTTPServer {
 }
 
 // 启动服务器
-const server = new CustomerServiceHTTPServer();
+const server = new TencentADPMCPServer();
 server.start();
