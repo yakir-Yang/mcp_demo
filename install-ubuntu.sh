@@ -142,8 +142,14 @@ configure_npm() {
     npm config set registry https://registry.npmmirror.com
     log_info "已设置npm镜像源为: $(npm config get registry)"
     
-    # 设置npm超时时间
-    npm config set timeout 60000
+    # 设置npm超时时间（使用正确的配置选项）
+    npm config set fetch-timeout 60000 2>/dev/null || log_warning "无法设置fetch-timeout"
+    npm config set fetch-retry-mintimeout 20000 2>/dev/null || log_warning "无法设置fetch-retry-mintimeout"
+    npm config set fetch-retry-maxtimeout 120000 2>/dev/null || log_warning "无法设置fetch-retry-maxtimeout"
+    
+    # 设置其他有用的npm配置
+    npm config set save-exact true 2>/dev/null || log_warning "无法设置save-exact"
+    npm config set audit false 2>/dev/null || log_warning "无法设置audit"
     
     log_success "npm配置完成"
 }

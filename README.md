@@ -520,7 +520,24 @@ sudo apt-get install -y nodejs
 echo $PATH
 ```
 
-#### 2. npm权限问题
+#### 2. npm配置问题
+
+**问题：** `npm error 'timeout' is not a valid npm option`
+
+**解决方案：**
+```bash
+# 使用修复脚本
+chmod +x fix-npm-config.sh
+./fix-npm-config.sh
+
+# 或手动修复
+npm config delete timeout
+npm config set fetch-timeout 60000
+npm config set fetch-retry-mintimeout 20000
+npm config set fetch-retry-maxtimeout 120000
+```
+
+#### 3. npm权限问题
 
 **问题：** `EACCES: permission denied`
 
@@ -542,7 +559,7 @@ nvm install 18
 nvm use 18
 ```
 
-#### 3. 依赖安装失败
+#### 4. 依赖安装失败
 
 **问题：** `npm ERR! peer dep missing`
 
@@ -562,7 +579,7 @@ npm install -g yarn
 yarn install
 ```
 
-#### 4. 构建工具缺失
+#### 5. 构建工具缺失
 
 **问题：** `gyp ERR! build error`
 
@@ -578,7 +595,7 @@ sudo apt-get install -y python3-dev
 sudo apt-get install -y libssl-dev libffi-dev
 ```
 
-#### 5. 网络连接问题
+#### 6. 网络连接问题
 
 **问题：** `npm ERR! network timeout`
 
@@ -591,14 +608,16 @@ npm config set registry https://registry.npmmirror.com
 npm config set registry https://registry.npm.taobao.org
 
 # 增加超时时间
-npm config set timeout 60000
+npm config set fetch-timeout 60000
+npm config set fetch-retry-mintimeout 20000
+npm config set fetch-retry-maxtimeout 120000
 
 # 使用代理（如果需要）
 npm config set proxy http://proxy-server:port
 npm config set https-proxy http://proxy-server:port
 ```
 
-#### 6. 端口占用问题
+#### 7. 端口占用问题
 
 **问题：** `EADDRINUSE: address already in use`
 
@@ -617,7 +636,7 @@ sudo kill -9 <PID>
 PORT=3001 npm start
 ```
 
-#### 7. 内存不足问题
+#### 8. 内存不足问题
 
 **问题：** `JavaScript heap out of memory`
 
@@ -633,7 +652,7 @@ node --max-old-space-size=4096 src/server.js
 free -h
 ```
 
-#### 8. 文件权限问题
+#### 9. 文件权限问题
 
 **问题：** `Permission denied`
 
